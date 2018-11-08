@@ -1,0 +1,205 @@
+import pandas as pd
+from sklearn.base import BaseEstimator, ClassifierMixin
+import scipy.spatial as sp
+from sklearn.metrics.scorer import make_scorer
+from sklearn import model_selection
+import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
+
+
+ # -----------------------------------------------------------------------------
+#Problem1
+def  findNearestHOF(k, inputDF, testRow):
+    #print(type(inputDF))
+    minimum = inputDF.apply(lambda row: sp.distance.euclidean(row, testRow), axis =1)
+    minimum_k = minimum.nsmallest(k)
+    ls = []
+    for i in range(k):
+        ls.append(minimum_k.index[i])
+    return ls
+
+def accuracyOfActualVsPredicted(actualOutputSeries, predOutputSeries):
+    compare = (actualOutputSeries == predOutputSeries).value_counts()
+    
+    # actualOutputSeries == predOutputSeries makes a Series of Boolean values.
+    # So in this case, value_counts() makes a Series with just two elements:
+    # - with index "False" is the number of times False appears in the Series
+    # - with index "True" is the number of times True appears in the Series
+
+    # print("compare:", compare, type(compare), sep='\n', end='\n\n')
+    
+    # if there are no Trues in compare, then compare[True] throws an error. 
+    #So we have to check:
+    
+    if (True in compare):
+        accuracy = compare[True] / actualOutputSeries.size
+    else:
+        accuracy = 0
+    
+    return accuracy
+
+
+
+
+
+class kNNClassifier(BaseEstimator, ClassifierMixin):
+    
+    def __init__(self, k):
+        self.k = k
+        self.inputsDF = None
+        self.outputSeries = None
+        self.scorer = make_scorer(accuracyOfActualVsPredicted, greater_is_better=True)
+    
+    def fit(self, inputsDF, outputSeries):
+        self.inputsDF = inputsDF
+        self.outputSeries = outputSeries
+        return self
+    
+    def predict(self, testInput):
+        
+        if self.k == 1:
+            if isinstance(testInput, pd.core.series.Series):
+                index = findNearestHOF(self.k, self.inputsDF, testInput)
+                return self.outputSeries.loc[index[0]]
+            else:
+                return testInput.apply(lambda row:self.outputSeries.loc[findNearestHOF(self.k, self.inputsDF, row)[0]], axis =1)
+        else:
+            if isinstance(testInput, pd.core.series.Series):
+                index = findNearestHOF(self.k, self.inputsDF, testInput)
+                return self.outputSeries.loc[index].mode()[0]
+            else:
+                return testInput.apply(lambda row: self.outputSeries.loc[findNearestHOF(self.k, self.inputsDF, row)].mode()[0], axis =1)
+        
+ # -----------------------------------------------------------------------------
+#Problem2
+def standardize(df, ls):
+    
+    df.loc[:, ls] =  (df.loc[:, ls] - df.loc[:, ls].mean())
+    df.loc[:, ls] = (df.loc[:, ls])/df.loc[:, ls].std()
+
+def testStandardize():
+    df, inputCols, outputCol = readData()
+    someCols = inputCols[2:5]
+    standardize(df, someCols)
+    print("After standardization, first 5 rows:", df.head(5), sep='\n', end='\n\n')
+    
+def readData(numRows = None):
+    inputCols = ["Alcohol", "Malic Acid", "Ash", "Alcalinity of Ash", "Magnesium", "Total Phenols", "Flavanoids", "Nonflavanoid Phenols", "Proanthocyanins", "Color Intensity", "Hue", "Diluted", "Proline"]
+    outputCol = 'Class'
+    colNames = [outputCol] + inputCols  # concatenate two lists into one
+    wineDF = pd.read_csv("data/wine.data", header=None, names=colNames, nrows = numRows)
+    
+    # Need to mix this up before doing CV
+    # wineDF = wineDF.sample(frac=1)  # "sample" 100% randomly.
+    wineDF = wineDF.sample(frac=1, random_state=99).reset_index(drop=True)
+    
+    return wineDF, inputCols, outputCol
+ 
+def testKNN():
+    
+    df, inputCols, outputCol = readData()
+    alg = kNNClassifier(1)
+    inputDF = df.loc[:, inputCols]
+    outputSeries = df.loc[:, outputCol]
+    cvScores = model_selection.cross_val_score(alg, inputDF, outputSeries, cv=10, scoring=alg.scorer)
+    orginal_cvScore_mean = cvScores.mean()
+    print("Original Data_set accuracy: ", orginal_cvScore_mean)
+     
+    s_df = df.copy()
+    standardize(s_df, inputCols)
+    s_inputDF = s_df.loc[:, inputCols]
+    s_outputSeries = s_df.loc[:, outputCol]
+    s_cvScores = model_selection.cross_val_score(alg, s_inputDF, s_outputSeries, cv=10, scoring=alg.scorer)
+    print("Standardize data_set accuracy: ", s_cvScores.mean())
+    
+    s_df8 = df.copy()
+    alg1 = kNNClassifier(8)
+    standardize(s_df8, inputCols)
+    s_inputDF8 = s_df8.loc[:, inputCols]
+    s_outputSeries8 = s_df8.loc[:, outputCol]
+    s_cvScores8 = model_selection.cross_val_score(alg1, s_inputDF8, s_outputSeries8, cv=10, scoring=alg.scorer)
+    print("Standardize data_set accuracy for 8NN: ", s_cvScores8.mean())
+   
+    #it takes more discrete values, hence we get to choose from more data giving enhanced accuracy. 
+         
+     
+# -----------------------------------------------------------------------------
+#Problem 3
+def pt_KNN(x):
+    df, inputCols, outputCol = readData()
+    alg = kNNClassifier(x)
+    standardize(df, inputCols)
+    inputDF = df.loc[:, inputCols]
+    outputSeries = df.loc[:, outputCol]
+    cvScores = model_selection.cross_val_score(alg, inputDF, outputSeries, cv=10, scoring=alg.scorer)
+    orginal_cvScore_mean = cvScores.mean()
+    return orginal_cvScore_mean
+    
+def plotKNN():
+    #df, inputCols, outputCol = readData()
+    neighborList = pd.Series([1,2,3,4,5,6,7,8,10,12,14,16,18,20,24,28,32,40,50,60,80]) 
+    accuracies = neighborList.map(lambda value: pt_KNN(value))
+    print(accuracies)
+    plt.plot(neighborList, accuracies)
+    plt.xlabel('Neighbors')
+    plt.ylabel('Accuracy')
+    neighborList.iloc[accuracies.idxmax()]
+
+
+
+
+
+
+
+
+
+# -----------------------------------------------------------------------------
+#Problem 4
+def builtINKNN_acc(value):
+    df, inputCols, outputCol = readData()
+    alg =  KNeighborsClassifier(n_neighbors = value)
+    standardize(df, inputCols)
+    inputDF = df.loc[:, inputCols]
+    outputSeries = df.loc[:, outputCol]
+    cvScores = model_selection.cross_val_score(alg, inputDF, outputSeries, cv=10, scoring='accuracy')
+    orginal_cvScore_mean = cvScores.mean()
+    return orginal_cvScore_mean
+    
+
+def builtInKNN():
+    
+    df, inputCols, outputCol = readData()
+    standardize(df, inputCols)
+    inputDF = df.loc[:, inputCols]
+    outputSeries = df.loc[:, outputCol]
+    alg = KNeighborsClassifier(n_neighbors = 8)
+    
+    cvScores = model_selection.cross_val_score(alg, inputDF, outputSeries, cv=10, scoring='accuracy')
+    print('Standardized dataset, 8NN, accuracy: ', cvScores.mean())
+    
+    neighborList = pd.Series([1,2,3,4,5,6,7,8,10,12,14,16,18,20,24,28,32,40,50,60,80])
+    accuracies = neighborList.map(lambda value: builtINKNN_acc(value))
+    print(accuracies)
+    plt.plot(neighborList, accuracies)
+    plt.xlabel('Neighbors')
+    plt.ylabel('Accuracy')
+    neighborList.iloc[accuracies.idxmax()]
+    
+        
+            
+    
+# -----------------------------------------------------------------------------
+# Given
+def test08():
+    print("=====================","testKNN (using kNNClassifier class):", sep="\n", end="\n")
+    testKNN()  # problem 2
+    
+    print("=====================","plotKNN (using kNNClassifier class):", sep="\n", end="\n")
+    plotKNN()  # problem 3
+    
+    print("=====================","builtInKNN (using KNeighborsClassifier class):", sep="\n", end="\n")
+    builtInKNN()  # problem 4
+
+
+    
+   
